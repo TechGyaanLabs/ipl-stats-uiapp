@@ -1,14 +1,10 @@
 google.charts.load('current', { packages: ['corechart'] });
 
-let cachedPlayers = null; // Store player data globally to prevent redundant API calls
-
-async function getPlayers() {
-    if (cachedPlayers) return cachedPlayers;
-
+baseUrl = 'https://ipl-stats-be.onrender.com/'
+async function getPlayers(teamId) {
     try {
-        const response = await fetch('js/players.json');
+        const response = await fetch(`${baseUrl}v1/stats/players/${teamId}`);
         if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
-
         cachedPlayers = await response.json();
         return cachedPlayers;
     } catch (error) {
@@ -19,18 +15,18 @@ async function getPlayers() {
 
 async function getTeams() {
     try {
-        const players = await getPlayers();
-        return [...new Set(players.map(player => player.team))]; // Use Set to remove duplicates
+        const teamDetails = await fetch(`${baseUrl}v1/stats/team-basic-details`).then(response => response.json());
+        return teamDetails.data; // Use Set to remove duplicates
     } catch (error) {
         console.error("Error fetching teams data:", error);
         return [];
     }
 }
 
-async function getPlayersByTeam(teamName) {
+async function getPlayersByTeam(teamId, teamLabel) {
     try {
-        const players = await getPlayers();
-        return players.filter(player => player.team === teamName);
+        const response = await getPlayers(teamId);
+        return response.data;
     } catch (error) {
         console.error("Error fetching players data:", error);
         return [];
@@ -39,17 +35,18 @@ async function getPlayersByTeam(teamName) {
 
 async function renderTeamButtons() {
     const teams = await getTeams();
+    console.log(teams);
     const idShowTeamNames = document.getElementById("idShowTeamNames");
-
     if (!idShowTeamNames) return console.error("Element not found!");
-
     idShowTeamNames.innerHTML = teams
-        .map(team => `<button class="btn btn-primary mx-2 mt-2" onclick="showPlayersOf('${team}')">${team}</button>`)
+        .map(team => `<button class="btn btn-primary mx-2 mt-2" onclick="showPlayersOf('${team.teamId}','${team.teamLabel}')">${team.teamLabel}</button>`)
         .join('');
+
+    showPlayersOf(teams[0].teamId, teams[0].teamLabel);
 }
 
-async function showPlayersOf(teamName) {
-    const players = await getPlayersByTeam(teamName);
+async function showPlayersOf(teamId) {
+    const players = await getPlayersByTeam(teamId);
     const idShowPlayers = document.getElementById("idShowPlayers");
 
     if (!idShowPlayers) return console.error("Element not found!");
@@ -71,7 +68,7 @@ async function showPlayersOf(teamName) {
                         <td>${player.name}</td>
                         <td>${player.role}</td>
                         <td>${player.country}</td>
-                        <td>${player.team}</td>
+                        <td>${player.teamLabel}</td>
                         <td>${player.price}</td>
                     </tr>`).join('')}
             </tbody>
@@ -80,27 +77,25 @@ async function showPlayersOf(teamName) {
 }
 
 async function getIplStats() {
-    const players = await getPlayers();
-
-    const stats = players.reduce((acc, player) => {
-        acc.teamAmount.set(player.team, (acc.teamAmount.get(player.team) || 0) + player.price);
-        acc.roleCount.set(player.role, (acc.roleCount.get(player.role) || 0) + 1);
-        acc.countryPlayerCount.set(player.country, (acc.countryPlayerCount.get(player.country) || 0) + 1);
-        return acc;
-    }, { teamAmount: new Map(), roleCount: new Map(), countryPlayerCount: new Map() });
-
+    const stats = await fetch(`${baseUrl}v1/stats/team-stats`).then(response => response.json()).then(data => data.data);
+    arr = stats.teamAmountStats;
+    stats.teamAmount = new Map(arr.map(i => [i.label, i.totalAmount]));
+    arr = stats.teamPlayerCountStats;
+    stats.roleCount = new Map(arr.map(i => [i.label, i.roleCount]));
+    arr = stats.countryNameWithPlayerCountStats;
+    stats.countryPlayerCount = new Map(arr.map(i => [i.countryName, i.playerCount]));
     showIplStatsCharts(stats);
 }
 
 function showIplStatsCharts(stats) {
-    drawChart('idTeamAmount', 'Total Amount Spent by Team', stats.teamAmount, 'ColumnChart');
-    drawChart('idRoleCount', 'Role Count', stats.roleCount, 'PieChart');
-    drawChart('idCountryPlayerCount', 'Players by Country', stats.countryPlayerCount, 'BarChart');
+    drawChart('idTeamAmount', 'Total Amount Spent by Team', stats.teamAmount, 'ColumnChart',['Team','Amount']);
+    drawChart('idRoleCount', 'Role Count', stats.roleCount, 'PieChart',['Role','Count']);
+    drawChart('idCountryPlayerCount', 'Players by Country', stats.countryPlayerCount, 'BarChart',['Country','Player Count']);
 }
 
-function drawChart(elementId, title, dataMap, chartType) {
-    let inputData = [[...dataMap.keys()][0] === 'Team' ? ['Team', 'Amount'] : ['Category', 'Count']];
-    
+function drawChart(elementId, title, dataMap, chartType,label) {
+    let inputData = []
+    inputData.push(label);
     for (let [key, value] of dataMap) {
         inputData.push([key, value]);
     }
